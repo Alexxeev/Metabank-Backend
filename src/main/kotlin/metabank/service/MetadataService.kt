@@ -1,17 +1,16 @@
 package metabank.service
 
+import java.sql.Connection
 import metabank.exception.NoSuchDatabaseException
+import metabank.model.PageQueryModel
+import metabank.model.PageQueryResultModel
 import metabank.repository.ColumnRepository
 import metabank.repository.DatabaseRepository
 import metabank.repository.MetadataRepository
 import metabank.repository.TableRepository
-import metabank.model.DatabaseConnectionModel
-import metabank.model.PageQueryModel
-import metabank.model.PageQueryResultModel
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.sql.Connection
 
 class MetadataService(
     private val metadataRepository: MetadataRepository,
@@ -35,8 +34,8 @@ class MetadataService(
         }
     }
 
-    suspend fun fetchSchema(connectionModel: DatabaseConnectionModel): Boolean {
-        val database = connectToDatabase(connectionModel.url)
+    suspend fun fetchSchema(connectionUrl: String): Boolean {
+        val database = connectToDatabase(connectionUrl)
         val databaseModel = metadataRepository.fetchDatabaseName(database)
         if (databaseRepository.exists(databaseModel.name))
             return false
