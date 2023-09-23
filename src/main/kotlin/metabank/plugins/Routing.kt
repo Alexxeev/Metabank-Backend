@@ -15,26 +15,22 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.UUID
+import java.util.*
 import metabank.factory.MetadataDatabase
-import metabank.model.DatabaseConnectionModel
 import metabank.model.PageQueryModel
 import metabank.repository.ColumnRepositoryImpl
 import metabank.repository.DatabaseRepositoryImpl
 import metabank.repository.MetadataRepository
 import metabank.repository.PageQueryRepositoryImpl
 import metabank.repository.TableRepositoryImpl
+import metabank.service.DatabaseFileService
 import metabank.service.MetadataService
 
-private const val TEN_MEGABYTES = 10 * 10 * 1024
+private const val TEN_MEGABYTES = 10 * 1024 * 1024
 
 fun Application.configureRouting() {
-    if (Files.notExists(Path.of("db"))) {
-        Files.createDirectory(Path.of("db"))
-    }
     val databaseRepository = DatabaseRepositoryImpl(MetadataDatabase.instance)
     val tableRepository = TableRepositoryImpl(MetadataDatabase.instance)
     val columnRepository = ColumnRepositoryImpl(MetadataDatabase.instance)
@@ -45,18 +41,14 @@ fun Application.configureRouting() {
         tableRepository,
         columnRepository
                                          )
+    val databaseFileService = DatabaseFileService(
+        databaseRepository
+                                                 )
+    databaseFileService.createWorkingDirectory()
     routing {
         get("/databases") {
             val databases = databaseRepository.findAll()
             call.respond(HttpStatusCode.OK, databases)
-        }
-
-        post("/databases") {
-            val connectionModel = call.receive<DatabaseConnectionModel>()
-            if (metadataService.fetchSchema(connectionModel))
-                call.respond(HttpStatusCode.Created, "Database successfully created")
-            else
-                call.respond(HttpStatusCode.OK, "Schema is already fetched")
         }
 
         get("/databases/{id}") {
@@ -74,6 +66,7 @@ fun Application.configureRouting() {
             val id = requireNotNull(call.parameters["id"]?.toIntOrNull()) {
                 "Database Id"
             }
+            databaseFileService.delete(id)
             databaseRepository.delete(id)
             call.respond(HttpStatusCode.OK)
         }
@@ -117,27 +110,29 @@ fun Application.configureRouting() {
             call.respond(HttpStatusCode.OK, result)
         }
 
-        post("/upload") {
-            var fileName = ""
+        post("/databases/upload") {
             val contentLength = requireNotNull(call.request.header(HttpHeaders.ContentLength)?.toIntOrNull()) {
                 "Content-Length header value"
             }
             require(contentLength < TEN_MEGABYTES) {
-                "File size must be less than 10 MB"
+                "File size must be less than 10 MB. Got $contentLength bytes}"
             }
             call.receiveMultipart().forEachPart {partData ->
                 when(partData) {
                     is PartData.FileItem -> {
-                        fileName = partData.originalFileName ?: UUID.randomUUID().toString().plus(".db")
-                        val bytes = partData.streamProvider().readBytes()
-                        File("db/${fileName}").writeBytes(bytes)
+                        val fileName = partData.originalFileName ?: UUID.randomUUID().toString().plus(".db")
+                        val filePath = "db/${fileName}"
+                        if (databaseFileService.exists(fileName)) {
+                            call.respond(HttpStatusCode.OK, "Database with this name already exists")
+                            return@forEachPart
+                        }
+                        databaseFileService.create(fileName, partData.streamProvider())
+                        metadataService.fetchSchema("jdbc:sqlite:${filePath}")
+                        call.respond(HttpStatusCode.Created, "Database successfully uploaded")
                     }
                     else -> {}
                 }
             }
-            val connectionModel = DatabaseConnectionModel("jdbc:sqlite:db/${fileName}")
-            metadataService.fetchSchema(connectionModel)
-            call.respond(HttpStatusCode.Created)
         }
     }
 }
