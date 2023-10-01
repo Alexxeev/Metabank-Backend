@@ -1,7 +1,7 @@
 package metabank.service
 
-import java.sql.Connection
 import metabank.exception.NoSuchDatabaseException
+import metabank.model.DatabaseConnectionModel
 import metabank.model.PageQueryModel
 import metabank.model.PageQueryResultModel
 import metabank.repository.ColumnRepository
@@ -9,8 +9,6 @@ import metabank.repository.DatabaseRepository
 import metabank.repository.MetadataRepository
 import metabank.repository.TableRepository
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.transactions.TransactionManager
-import org.jetbrains.exposed.sql.transactions.transaction
 
 class MetadataService(
     private val metadataRepository: MetadataRepository,
@@ -18,28 +16,29 @@ class MetadataService(
     private val tableRepository: TableRepository,
     private val columnRepository: ColumnRepository
                      ) {
-    private fun connectToDatabase(url: String): Database {
+    private val databases: MutableMap<String, Database> = mutableMapOf()
+
+    private fun connectToDatabase(url: String, username: String? = null, password: String? = null): Database {
         try {
-            return Database.connect(
+
+            return databases[url] ?: Database.connect(
                 url = url,
-                driver = "org.sqlite.JDBC"
-            ).also {
-                transaction(it) {
-                    TransactionManager.manager.defaultIsolationLevel =
-                        Connection.TRANSACTION_SERIALIZABLE
-                }
+                driver = "org.postgresql.Driver",
+                user = username ?: "",
+                password = password ?: "").also {
+                databases[url] = it
             }
         } catch (e: IllegalStateException) {
             throw NoSuchDatabaseException(url, e)
         }
     }
 
-    suspend fun fetchSchema(connectionUrl: String): Boolean {
-        val database = connectToDatabase(connectionUrl)
+    suspend fun fetchSchema(connectionModel: DatabaseConnectionModel): Boolean {
+        val database = connectToDatabase(connectionModel.url, connectionModel.username, connectionModel.password)
         val databaseModel = metadataRepository.fetchDatabaseName(database)
         if (databaseRepository.exists(databaseModel.name))
             return false
-        val databaseId = databaseRepository.save(databaseModel)
+        val databaseId = databaseRepository.save(databaseModel, connectionModel)
         val tables = metadataRepository.fetchTableNames(database)
         tableRepository.saveBatch(databaseId, tables).forEach { tableModel->
             val columns = metadataRepository.fetchColumnNames(database ,tableModel.name)
@@ -53,7 +52,7 @@ class MetadataService(
         val databaseModel = databaseRepository
             .find(pageQueryModel.databaseId)
             ?: throw IllegalArgumentException("Database Id: ${pageQueryModel.databaseId}")
-        val database = connectToDatabase(databaseModel.url)
+        val database = connectToDatabase(databaseModel.url, databaseModel.username, databaseModel.password)
         val tableName = tableRepository
             .findById(pageQueryModel.tableId)
             ?.name
@@ -73,5 +72,15 @@ class MetadataService(
                 pageQueryModel.numberOfElements,
                 pageQueryModel.offset
             )
+    }
+
+    suspend fun dropDatabase(id: Int) {
+        val databaseModel = checkNotNull(databaseRepository.find(id)) {
+            "Database with provided id does not exist"
+        }
+        databases[databaseModel.url]?.let {
+            databases.remove(databaseModel.url)
+        }
+        databaseRepository.delete(databaseModel.id)
     }
 }
