@@ -8,7 +8,7 @@ val postgre_version : String by project
 plugins {
     kotlin("jvm") version "1.9.23"
     id("io.ktor.plugin") version "2.3.10"
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.23"
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.24"
 }
 
 group = "metabank"
