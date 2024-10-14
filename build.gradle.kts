@@ -6,7 +6,7 @@ val sqlite_version : String by project
 val postgre_version : String by project
 
 plugins {
-    kotlin("jvm") version "2.0.0"
+    kotlin("jvm") version "2.0.21"
     id("io.ktor.plugin") version "2.3.12"
     id("org.jetbrains.kotlin.plugin.serialization") version "2.0.0"
 }
